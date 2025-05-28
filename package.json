@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-local-images-modernized",
+	"name": "obsidian-local-images",
 	"version": "1.0.0",
-	"description": "Modernized Obsidian plugin to download local images.",
+	"description": "Obsidian plugin to download local images.",
 	"main": "src/main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
