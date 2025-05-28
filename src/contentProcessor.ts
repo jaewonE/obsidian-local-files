@@ -202,10 +202,10 @@ export class ContentProcessor {
 				this.plugin.addProcessedUrl(imageUrl, newImageFullPath);
 
 				imagesProcessed++;
-				new Notice(
-					`Downloaded and linked: ${actualSavedImageName}`,
-					3000
-				);
+				// new Notice(
+				// 	`Downloaded and linked: ${actualSavedImageName}`,
+				// 	3000
+				// );
 			} catch (error) {
 				console.error(`Error processing image ${imageUrl}:`, error);
 				new Notice(

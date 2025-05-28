@@ -4,6 +4,8 @@
 ![Release Date](https://img.shields.io/badge/Released-May%2028%2C%202025-green.svg)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)
 
+![demo](https://github.com/jaewonE/obsidian-local-files/blob/master/assets/demo.gif?raw=true)
+
 **Automatically downloads external images in your notes to your local vault, ensuring your visual content remains accessible and future-proof.**
 
 ---
