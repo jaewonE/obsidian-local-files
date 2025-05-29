@@ -8,10 +8,14 @@ import {
 	LocalImagesSettings,
 } from "./config";
 import { ContentProcessor } from "./contentProcessor";
+import { ImageMeta } from "./utils";
 
-// ★ 레지스트리 타입
+/**
+ * Interface for the download registry, mapping URLs to their metadata.
+ * This is used to track images that have been downloaded and their local paths.
+ */
 export interface DownloadRegistry {
-	[url: string]: string;
+	[url: string]: ImageMeta;
 }
 
 interface PluginData {
@@ -80,35 +84,35 @@ export default class LocalImagesPlugin extends Plugin {
 	}
 
 	/**
-	 * Marks a URL as processed with its local file path.
+	 * Marks a URL as processed with its image metadata.
 	 * @param url The URL string to mark.
-	 * @param filePath The local file path where the image was saved.
+	 * @param imageMeta Metadata of the downloaded image.
 	 */
-	addProcessedUrl(url: string, filePath: string): void {
-		this.pluginData.processedImageUrls[url] = filePath;
+	addProcessedUrl(url: string, imageMeta: ImageMeta): void {
+		this.pluginData.processedImageUrls[url] = imageMeta;
 		// Note: savePluginData() should be called after a batch of operations
 	}
 
 	/**
-	 * Checks if a URL has already been processed and returns its file path.
-	 * Also verifies if the file still exists.
+	 * Checks if a URL has already been processed and returns its metadata.
+	 * Does NOT verify if the file is still the same - that happens in contentProcessor.
 	 *
 	 * @param url The URL string to check.
-	 * @returns The local file path if the URL has been processed and the file exists, null otherwise.
+	 * @returns The image metadata if the URL has been processed, null otherwise.
 	 */
-	getProcessedUrlFilePath(url: string): string | null {
-		const filePath = this.pluginData.processedImageUrls[url];
-		if (!filePath) return null;
+	getProcessedUrlMeta(url: string): ImageMeta | null {
+		const imageMeta = this.pluginData.processedImageUrls[url];
+		if (!imageMeta) return null;
 
-		// Check if file exists
-		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (file instanceof TFile) {
-			return filePath;
+		// Check if file exists at all
+		const file = this.app.vault.getAbstractFileByPath(imageMeta.filePath);
+		if (!(file instanceof TFile)) {
+			// File doesn't exist anymore, it was likely deleted
+			console.log(`File for URL ${url} no longer exists at ${imageMeta.filePath}`);
+			return null;
 		}
 
-		// File doesn't exist anymore, it was likely deleted
-		console.log(`File for URL ${url} no longer exists at ${filePath}`);
-		return null;
+		return imageMeta;
 	}
 
 	/**

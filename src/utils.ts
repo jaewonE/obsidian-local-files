@@ -10,6 +10,17 @@ import {
 } from "obsidian";
 import { join } from "path"; // Using Node.js path join for robust path construction
 
+/**
+ * Interface for image metadata storage and verification
+ */
+export interface ImageMeta {
+	filePath: string;
+	size: number; // file size in bytes
+	width: number; // image width in pixels
+	height: number; // image height in pixels
+	hash: string; // SHA-256 hash of the image content
+}
+
 // Define a more specific type for common image MIME types
 type ImageMimeType =
 	| "image/jpeg"
@@ -230,4 +241,211 @@ export async function generateUniqueImageNameAndPath(
 	usedCounters.add(counter);
 
 	return { fileName, fullPath, attachmentFolderPath };
+}
+
+/**
+ * Generates a SHA-256 hash from an ArrayBuffer.
+ * @param buffer The image content as ArrayBuffer.
+ * @returns Promise resolving to a hex string hash.
+ */
+export async function generateHash(buffer: ArrayBuffer): Promise<string> {
+	// Use Web Crypto API for hashing
+	const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+
+	// Convert to hex string
+	const hashArray = Array.from(new Uint8Array(hashBuffer));
+	return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Gets image dimensions from an ArrayBuffer.
+ * @param buffer The image data as ArrayBuffer.
+ * @param mimeType The MIME type of the image.
+ * @returns Promise resolving to {width, height} in pixels.
+ */
+export async function getImageDimensions(
+	buffer: ArrayBuffer,
+	mimeType: string
+): Promise<{ width: number; height: number }> {
+	return new Promise((resolve, reject) => {
+		// Create a blob from the buffer
+		const blob = new Blob([buffer], { type: mimeType });
+		const url = URL.createObjectURL(blob);
+
+		// Create an image element to load the blob
+		const img = new Image();
+		img.onload = () => {
+			const dimensions = {
+				width: img.width,
+				height: img.height,
+			};
+			URL.revokeObjectURL(url);
+			resolve(dimensions);
+		};
+		img.onerror = () => {
+			URL.revokeObjectURL(url);
+			reject(new Error("Failed to load image for dimension analysis"));
+		};
+		img.src = url;
+	});
+}
+
+/**
+ * Analyzes an image file and generates comprehensive metadata.
+ * @param app The Obsidian App instance.
+ * @param filePath Path to the image file in the vault.
+ * @param buffer Optional ArrayBuffer of the image (to avoid reading it twice).
+ * @param mimeType Optional MIME type of the image.
+ * @returns Promise resolving to ImageMeta object.
+ */
+export async function analyzeImage(
+	app: App,
+	filePath: string,
+	buffer?: ArrayBuffer,
+	mimeType?: string
+): Promise<ImageMeta> {
+	const file = app.vault.getAbstractFileByPath(filePath) as TFile;
+	if (!file) {
+		throw new Error(`File not found: ${filePath}`);
+	}
+
+	// If buffer not provided, read it from the file
+	if (!buffer) {
+		buffer = await app.vault.readBinary(file);
+	}
+
+	// Get file size
+	const size = buffer.byteLength;
+
+	// Get MIME type if not provided
+	if (!mimeType) {
+		mimeType =
+			file.extension === "svg"
+				? "image/svg+xml"
+				: `image/${file.extension}`;
+	}
+
+	// Get image dimensions
+	const { width, height } = await getImageDimensions(buffer, mimeType);
+
+	// Generate hash
+	const hash = await generateHash(buffer);
+
+	return {
+		filePath,
+		size,
+		width,
+		height,
+		hash,
+	};
+}
+
+/**
+ * Verifies if an image file matches the stored metadata.
+ * @param app The Obsidian App instance.
+ * @param oldMeta Previously stored metadata for comparison.
+ * @returns Promise resolving to boolean indicating if the file matches the metadata.
+ */
+export async function verifyImage(
+	app: App,
+	oldMeta: ImageMeta
+): Promise<boolean> {
+	try {
+		const file = app.vault.getAbstractFileByPath(oldMeta.filePath) as TFile;
+		if (!file) return false;
+
+		// First check file size as a quick filter (avoids reading the file if size differs)
+		const fileSize = file.stat.size;
+		if (fileSize !== oldMeta.size) {
+			console.log(
+				`File size mismatch for ${oldMeta.filePath}: ${fileSize} vs ${oldMeta.size}`
+			);
+			return false;
+		}
+
+		// Read the file content
+		const buffer = await app.vault.readBinary(file);
+
+		// Get MIME type
+		const mimeType =
+			file.extension === "svg"
+				? "image/svg+xml"
+				: `image/${file.extension}`;
+
+		// Check image dimensions
+		try {
+			const { width, height } = await getImageDimensions(
+				buffer,
+				mimeType
+			);
+			if (width !== oldMeta.width || height !== oldMeta.height) {
+				console.log(
+					`Dimension mismatch for ${oldMeta.filePath}: ${width}x${height} vs ${oldMeta.width}x${oldMeta.height}`
+				);
+				return false;
+			}
+		} catch (error) {
+			console.error(`Error checking dimensions: ${error}`);
+			return false;
+		}
+
+		// As a final check, compare hash
+		const hash = await generateHash(buffer);
+		if (hash !== oldMeta.hash) {
+			console.log(
+				`Hash mismatch for ${oldMeta.filePath}: ${hash} vs ${oldMeta.hash}`
+			);
+			return false;
+		}
+
+		return true;
+	} catch (error) {
+		console.error(`Error verifying image: ${error}`);
+		return false;
+	}
+}
+
+/**
+ * Tries to determine the image extension from just the URL (without downloading).
+ * @param imageUrl The URL of the image.
+ * @returns The determined image extension or null if undetermined.
+ */
+export function getImageExtensionFromUrlOnly(imageUrl: string): string | null {
+	try {
+		const urlObj = new URL(imageUrl);
+		const extension = urlObj.pathname.split(".").pop();
+		if (
+			extension &&
+			/^[a-zA-Z0-9]+$/.test(extension) &&
+			extension.length < 5
+		) {
+			// Basic validation for common extensions
+			return extension.toLowerCase();
+		}
+	} catch (error) {
+		console.warn(
+			`Could not parse URL to get extension: ${imageUrl}`,
+			error
+		);
+	}
+	return null;
+}
+
+/**
+ * Checks if a file extension is in the allowed list.
+ * @param extension The extension to check (without dot)
+ * @param allowedExtensions Comma-separated list of allowed extensions
+ * @returns Boolean indicating if the extension is allowed
+ */
+export function isExtensionAllowed(
+	extension: string,
+	allowedExtensions: string
+): boolean {
+	if (!extension || !allowedExtensions) return false;
+
+	const allowedList = allowedExtensions
+		.toLowerCase()
+		.split(",")
+		.map((ext) => ext.trim());
+	return allowedList.includes(extension.toLowerCase());
 }

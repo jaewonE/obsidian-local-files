@@ -5,7 +5,12 @@ import LocalImagesPlugin from "./main";
 import {
 	downloadImageToArrayBuffer,
 	getImageExtensionFromUrlOrHeaders,
+	getImageExtensionFromUrlOnly, // New import
+	isExtensionAllowed, // New import
 	generateUniqueImageNameAndPath,
+	analyzeImage,
+	verifyImage,
+	ImageMeta,
 } from "./utils";
 
 const EXTERNAL_IMAGE_LINK_REGEX =
@@ -105,40 +110,67 @@ export class ContentProcessor {
 
 			if (!imageUrl || startIndex === -1) continue;
 
-			// 1. Check if URL was processed before and file still exists
-			const existingFilePath =
-				this.plugin.getProcessedUrlFilePath(imageUrl);
+			// 1. Check if URL was processed before and get metadata
+			const existingMetadata = this.plugin.getProcessedUrlMeta(imageUrl);
 
-			if (existingFilePath) {
-				// 2. File exists, reuse it
-				const existingFile = this.app.vault.getAbstractFileByPath(
-					existingFilePath
-				) as TFile;
-
-				// Create link content with size/alias if needed
-				let linkContent = existingFile.name;
-				if (sizeOrAlias) {
-					linkContent += `|${sizeOrAlias}`;
-				}
-
-				const newLinkMarkdown = `![[${linkContent}]]`;
-
-				processedImageReplacements.push({
-					newLinkMarkdown,
-					originalLinkMarkdown,
-					startIndex,
-					endIndex,
-				});
-
-				imagesReused++;
-				new Notice(
-					`Reusing existing local file: ${existingFile.basename}`,
-					3000
+			if (existingMetadata) {
+				// 2. Verify that the existing file matches the metadata
+				const isImageValid = await verifyImage(
+					this.app,
+					existingMetadata
 				);
-				continue;
+
+				if (isImageValid) {
+					// Image is valid, reuse it
+					const existingFile = this.app.vault.getAbstractFileByPath(
+						existingMetadata.filePath
+					) as TFile;
+
+					// Create link content with size/alias if needed
+					let linkContent = existingFile.name;
+					if (sizeOrAlias) {
+						linkContent += `|${sizeOrAlias}`;
+					}
+
+					const newLinkMarkdown = `![[${linkContent}]]`;
+
+					processedImageReplacements.push({
+						newLinkMarkdown,
+						originalLinkMarkdown,
+						startIndex,
+						endIndex,
+					});
+
+					imagesReused++;
+					new Notice(
+						`Reusing existing local file: ${existingFile.basename}`,
+						3000
+					);
+					continue;
+				}
+				// If verification fails, fall through to re-download the image
+				console.log(
+					`Image verification failed for ${imageUrl}, re-downloading...`
+				);
 			}
 
-			// 3. File doesn't exist or was never processed, download it
+			// Before downloading, try to check extension from URL
+			const urlExtension = getImageExtensionFromUrlOnly(imageUrl);
+			if (
+				urlExtension &&
+				!isExtensionAllowed(
+					urlExtension,
+					this.plugin.pluginData.settings.allowedExtensions
+				)
+			) {
+				console.log(
+					`Skipping download of ${imageUrl}: extension ${urlExtension} is not in the allowed list.`
+				);
+				imagesSkipped++;
+				continue; // Skip to next image
+			}
+
+			// 3. File doesn't exist, validation failed, or was never processed, download it
 			try {
 				const downloadResult = await downloadImageToArrayBuffer(
 					imageUrl
@@ -156,6 +188,22 @@ export class ContentProcessor {
 					imageUrl,
 					headers
 				);
+
+				// Final check if extension is in the allowed list (in case URL didn't show the real extension)
+				if (
+					!isExtensionAllowed(
+						extension,
+						this.plugin.pluginData.settings.allowedExtensions
+					)
+				) {
+					new Notice(
+						`Skipped file with disallowed extension: ${extension}`,
+						5000
+					);
+					imagesSkipped++;
+					continue; // Skip to next image
+				}
+
 				const noteBasename = currentFile.basename;
 
 				// Pass the usedCountersInSession to track used counters in this processing session
@@ -182,6 +230,24 @@ export class ContentProcessor {
 					continue;
 				}
 
+				// Generate image metadata and store it
+				try {
+					const mimeType =
+						headers.get("content-type") || `image/${extension}`;
+					const imageMeta = await analyzeImage(
+						this.app,
+						newImageFullPath,
+						arrayBuffer,
+						mimeType
+					);
+
+					// Store URL -> metadata mapping
+					this.plugin.addProcessedUrl(imageUrl, imageMeta);
+				} catch (error) {
+					console.error(`Error analyzing image metadata: ${error}`);
+					// Continue processing even if metadata creation fails
+				}
+
 				// Use the actual saved file name (which is now guaranteed to be unique)
 				let newLocalLinkContent = actualSavedImageName;
 
@@ -198,14 +264,7 @@ export class ContentProcessor {
 					endIndex,
 				});
 
-				// Store URL -> file path mapping
-				this.plugin.addProcessedUrl(imageUrl, newImageFullPath);
-
 				imagesProcessed++;
-				// new Notice(
-				// 	`Downloaded and linked: ${actualSavedImageName}`,
-				// 	3000
-				// );
 			} catch (error) {
 				console.error(`Error processing image ${imageUrl}:`, error);
 				new Notice(
