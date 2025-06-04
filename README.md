@@ -130,6 +130,6 @@ Potential areas for future development include:
 
 ## License
 
-This plugin is released under the **GNU General Public License v3.0**. Refer to the [LICENSE](LICENSE.md) file for details.
+This plugin is released under the **GNU General Public License v3.0**. Refer to the [LICENSE](LICENSE) file for details.
 
 ---
