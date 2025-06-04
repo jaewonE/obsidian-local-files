@@ -1,12 +1,12 @@
 // src/utils.ts
 
 import {
-	App,
-	requestUrl,
-	RequestUrlResponse,
-	TFile,
-	normalizePath,
-	Setting,
+        App,
+        requestUrl,
+        RequestUrlResponse,
+        TFile,
+        normalizePath,
+        Setting,
 } from "obsidian";
 import { join } from "path"; // Using Node.js path join for robust path construction
 
@@ -123,7 +123,16 @@ export function getImageExtensionFromUrlOrHeaders(
  * @returns A sanitized string suitable for filenames.
  */
 export function sanitizeFileName(name: string): string {
-	return name.replace(/[\\/:*?"<>|#%&{}]/g, "_");
+        return name.replace(/[\\/:*?"<>|#%&{}]/g, "_");
+}
+
+/**
+ * Escapes special characters in a string for use in a regular expression.
+ * @param str The string to escape.
+ * @returns The escaped string safe for RegExp construction.
+ */
+export function escapeRegExp(str: string): string {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -213,14 +222,15 @@ export async function generateUniqueImageNameAndPath(
 		app,
 		currentNote
 	);
-	const saneBase = sanitizeFileName(noteBasename);
+        const saneBase = sanitizeFileName(noteBasename);
+        const escapedBase = escapeRegExp(saneBase);
 
 	/* ①   현재 폴더에 이미 존재하는 `[basename]-숫자.*` 를 모두 수집 */
 	const used = new Set<number>([...usedCounters]); // Include already used counters from this session
 	for (const f of app.vault.getFiles()) {
 		if ((f.parent?.path || "") !== attachmentFolderPath) continue;
 
-		const m = f.basename.match(new RegExp(`^${saneBase}-(\\d+)$`, "i"));
+                const m = f.basename.match(new RegExp(`^${escapedBase}-(\\d+)$`, "i"));
 		if (m) used.add(Number(m[1]));
 	}
 
